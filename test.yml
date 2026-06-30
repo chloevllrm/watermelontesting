@@ -1,0 +1,18 @@
+name: Run Watermelon Test Pack
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Watermelon Test Pack
+        run: |
+          echo "Running test pack 9024759..."
+
+          curl -k -X GET "https://wm-sandbox-1.watermelon.us/services/wmuitestcontroller/executeTestPack?testPackId=9024759"
+``
