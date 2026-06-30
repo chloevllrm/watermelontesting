@@ -1,4 +1,4 @@
-name: Run Watermelon Test Pack
+name: Run Watermelon Test Pack (Final)
 
 on:
   push:
@@ -9,10 +9,83 @@ jobs:
   run-test:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Trigger Watermelon Test Pack
-        run: |
-          echo "Running test pack 9024759..."
+    env:
+      WM_USERNAME: ${{ secrets.WM_USERNAME }}
+      WM_PASSWORD: ${{ secrets.WM_PASSWORD }}
 
-          curl -k -X GET "https://wm-sandbox-1.watermelon.us/services/wmuitestcontroller/executeTestPack?testPackId=9024759"
-``
+      AUTH_URL: https://wm-sandbox-1.watermelon.us/realms/watermelon/protocol/openid-connect/token
+      EXECUTE_URL: https://wm-sandbox-1.watermelon.us/services/wmuitestcontroller/executeTestPack
+      STATUS_URL: https://wm-sandbox-1.watermelon.us/services/wmuitestcontroller/status
+
+      TEST_PACK_ID: 9024759
+
+    steps:
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # ✅ STEP 1: Login and get token
+      - name: Authenticate
+        id: auth
+        run: |
+          echo "Getting token..."
+
+          TOKEN=$(curl -s -X POST "$AUTH_URL" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=web_app" \
+            -d "username=$WM_USERNAME" \
+            -d "password=$WM_PASSWORD" \
+            -d "grant_type=password" | jq -r '.access_token')
+
+          echo "Token acquired ✅"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      # ✅ STEP 2: Trigger test pack
+      - name: Execute Test Pack
+        id: trigger
+        run: |
+          TOKEN=${{ steps.auth.outputs.token }}
+
+          echo "Triggering test pack..."
+
+          RESPONSE=$(curl -s -X GET "$EXECUTE_URL?testPackId=$TEST_PACK_ID" \
+            -H "Authorization: Bearer $TOKEN")
+
+          echo "Response: $RESPONSE"
+
+          RUN_ID=$(echo $RESPONSE | jq -r '.id')
+          echo "Run ID: $RUN_ID"
+
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+
+      # ✅ STEP 3: Check status (simple polling)
+      - name: Check Test Status
+        run: |
+          TOKEN=${{ steps.auth.outputs.token }}
+          RUN_ID=${{ steps.trigger.outputs.run_id }}
+
+          echo "Waiting before checking status..."
+          sleep 10
+
+          for i in {1..10}
+          do
+            echo "Checking status... attempt $i"
+
+            STATUS_RESPONSE=$(curl -s -X GET "$STATUS_URL/$RUN_ID" \
+              -H "Authorization: Bearer $TOKEN")
+
+            STATE=$(echo $STATUS_RESPONSE | jq -r '.state')
+            RESULT=$(echo $STATUS_RESPONSE | jq -r '.status')
+
+            echo "Current State: $STATE"
+            echo "Result: $RESULT"
+
+            if [ "$STATE" = "COMPLETED" ]; then
+              echo "Test Completed ✅"
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Test did not complete in time ❌"
+          exit 1
